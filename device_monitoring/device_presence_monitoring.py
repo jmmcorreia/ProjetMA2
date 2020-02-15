@@ -1,10 +1,10 @@
+from threading import Thread
 from db_start import Session
 from device_monitoring.devices_dao import Device, DeviceMonitoring
-from threading import Thread
 from datetime import datetime
+import logging
 import nmap
 import time
-import logging
 import constants
 
 logging.basicConfig(filename="DeviceMonitoring.log", format=constants.LOGGING_FORMAT)
@@ -48,15 +48,15 @@ class DevicePing(Thread):
                 self._handle_down_state()
 
     def _handle_down_state(self):
-        logging.ERROR("DEVICE IS DOWN")
+        logging.error("DEVICE IS DOWN")
 
     def run(self):
         while self.running:
             try:
                 ping = self.network_scanner.scan(hosts=self.device.ip, arguments='-n -T4 -sn')['nmap']
                 self._handle_ping_result(ping)
-            except (nmap.PortScannerError, nmap.nmap.PortScannerError, Exception) as e:
-                print('ERROR: {0}'.format(e))
+            except (nmap.PortScannerError) as error:
+                print('ERROR: %s' % error)
 
 
 test = PingHandler()

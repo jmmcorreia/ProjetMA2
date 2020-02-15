@@ -1,14 +1,14 @@
-from threading import Thread
-from utils import get_config_file_section, get_file, UnknownFileExtension
-from db_start import Session
-from device_monitoring.devices_dao import Device
 import datetime
 import logging
 import time
 import constants
+import ipaddress
+from threading import Thread
 import nmap
 import netifaces
-import ipaddress
+from utils import get_config_file_section, get_file, UnknownFileExtension
+from db_start import Session
+from device_monitoring.devices_dao import Device
 
 logging.basicConfig(filename='NetworkMap.log', format=constants.LOGGING_FORMAT)
 
@@ -53,7 +53,8 @@ class NetworkMapper(Thread):
         if type_ip is not None and type_mac is not None:
             if type_ip == type_mac:
                 return type_ip
-            raise ValueError("Two different types were identified for the IP: {ip} and MAC: {mac} combination.".format(ip=ip, mac=mac))
+            raise ValueError("Two different types were identified for the IP: {ip} and MAC: {mac} combination.".format(
+                ip=ip, mac=mac))
         elif type_ip is not None:
             return type_ip
         elif type_mac is not None:
@@ -66,7 +67,8 @@ class NetworkMapper(Thread):
         if mac_address is not None:
             vendor = scan_data['vendor'].get(mac_address, "")
             device_type = self._get_device_type(ip, mac_address)
-            device = Device(mac_address=mac_address, ip=ip, device_type=device_type, vendor=vendor, discovery_date=datetime.datetime.now())
+            device = Device(mac_address=mac_address, ip=ip, device_type=device_type, vendor=vendor,
+                            discovery_date=datetime.datetime.now())
             self.session.merge(device)
             self.session.commit()
         else:
