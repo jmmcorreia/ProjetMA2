@@ -1,4 +1,5 @@
-from pysnmp.hlapi import *
+from pysnmp.hlapi import SnmpEngine, getCmd, nextCmd, ObjectIdentity, CommunityData, UsmUserData, UdpTransportTarget, \
+    ContextData, ObjectType
 from itertools import tee
 import logging
 import time
@@ -11,7 +12,8 @@ class SnmpQueryHandler:
     This class handles all the SNMP queries to an agent.
     """
 
-    def __init__(self, server_address, get_values_dict, walk_values_dict, max_nb_tries=3, sleep_between_tries=2, snmp_port=161, version=2,
+    def __init__(self, server_address, get_values_dict, walk_values_dict, max_nb_tries=3, sleep_between_tries=2,
+                 snmp_port=161, version=2,
                  community_index='public', username=None, auth_key=None, priv_key=None):
         """
         :param str server_address: IP address (IPv4 format) of the agent to be monitored
@@ -133,9 +135,9 @@ class SnmpQueryHandler:
                                ContextData(),
                                ObjectType(object_identity),
                                lexicographicMode=False)  # STOPS WALKS WITHOUT CROSSING BOUNDARIES EXAMPLE: IF WE GIVE OID 1.3.6.1.2.1.25.4.2.1.2, WE WILL ONLY WALK 1.3.6.1.2.1.25.4.2.1.2.X VALUES. IF THIS IS TRUE, WE WALK THE WHOLE TREE AFTER 1.3.6.1.2.1.25.4.2.1.2
-        else:
-            raise SnmpVersionException(
-                "SNMPv{}  does not currently exist or is not supported by this query".format(self.snmp_version))
+
+        raise SnmpVersionException(
+            "SNMPv{}  does not currently exist or is not supported by this query".format(self.snmp_version))
 
     def _snmp_get(self, cmd_generator, tries=0):
         """
@@ -163,9 +165,9 @@ class SnmpQueryHandler:
         if error_indication or error_status:
             time.sleep(self.sleep_between_tries)
             return self._snmp_get(copy_cmd_generator, tries + 1)
-        else:
-            oid, value = var_bind[0]
-            return value
+
+        oid, value = var_bind[0]
+        return value
 
     def _snmp_walk(self, cmd_generator, tries=0):
         cmd_generator, copy_cmd_generator = tee(cmd_generator)
@@ -185,7 +187,7 @@ class SnmpQueryHandler:
                 else:
                     for var_bind in var_binds:
                         result.append(var_bind)
-                        print(' = '.join([x.prettyPrint() for x in var_bind]))  # TODO
+                        # print(' = '.join([x.prettyPrint() for x in var_bind]))
 
         else:
             raise SnmpAgentQueryException(
@@ -227,18 +229,15 @@ class SnmpAgentQueryException(Exception):
     """
     Raised when the SNMP query handler fails to obtain any response from the Server
     """
-    pass
 
 
 class SnmpVersionException(Exception):
     """
     Raised when the SNMP version chosen by the user does not exist or isn't supported.
     """
-    pass
 
 
 class SnmpMissingCredentialsException(Exception):
     """
     Raised when the SNMP version chosen by the user requires credentials but they were not specified.
     """
-    pass
