@@ -42,4 +42,3 @@ class UnknownFileExtension(Exception):
     """
     Raised when the file extension we are trying to read is unknown/not supported
     """
-    pass

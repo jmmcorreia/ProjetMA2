@@ -64,4 +64,3 @@ query = ServerMonitoring("192.168.0.111", 20, 1)
 query.start()
 time.sleep(6000)
 query.running = False
-

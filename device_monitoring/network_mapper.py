@@ -28,9 +28,9 @@ class NetworkMapper(Thread):
         if self.network is not None:
             network_scanner = nmap.PortScanner()
             return network_scanner.scan(hosts=self.network.with_prefixlen, arguments=commands)
-        else:
-            self._get_local_network()
-            return self._scan_network(commands)
+
+        self._get_local_network()
+        return self._scan_network(commands)
 
     def _get_local_network(self):
         if_addresses = netifaces.ifaddresses(self.if_name)
@@ -87,9 +87,5 @@ class NetworkMapper(Thread):
                     self.run()
 
 
-
 n = NetworkMapper('{ABDBE570-3CFB-4C82-850B-862878445FD1}', ['-n -T4 -sn --max-rate 10'])
 n.start()
-
-
-

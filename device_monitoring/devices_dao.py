@@ -16,7 +16,8 @@ class Device(Base):
     monitoring = relationship('DeviceMonitoring')
 
     def __repr__(self):
-        return 'MAC: {mac_address}, IP: {ip}, TYPE: {device_type}, VENDOR: {vendor}, DISCOVERY: {discovery_date}'.format(**self.__dict__)
+        return 'MAC: {mac_address}, IP: {ip}, TYPE: {device_type}, VENDOR: {vendor}, DISCOVERY: {discovery_date}'.format(
+            **self.__dict__)
 
 
 class DeviceMonitoring(Base):
@@ -47,18 +48,20 @@ class ServerUptime(Base):
 
     def compare_uptime(self, previous_uptime):
         delta_time = self.date - previous_uptime.date
-        expected_uptime = (previous_uptime.server_uptime + delta_time.total_seconds() * constants.SECONDS_TO_HUNDREDTHS) % 2**constants.COUNTER_BITS  # *100 because server_uptime is in hundredths of a second
+        expected_uptime = (
+                                      previous_uptime.server_uptime + delta_time.total_seconds() * constants.SECONDS_TO_HUNDREDTHS) % 2 ** constants.COUNTER_BITS  # *100 because server_uptime is in hundredths of a second
         if expected_uptime > previous_uptime.server_uptime:  # No overflow
             return previous_uptime.server_uptime > self.server_uptime
-        else:  # Handle overflow
-            eps = 2 * constants.SECONDS_TO_HUNDREDTHS  # Handle possible measure error. datetime does not correspond exactly to the time of measure
-            return expected_uptime - eps > self.server_uptime
+
+        # Handle overflow
+        eps = 2 * constants.SECONDS_TO_HUNDREDTHS  # Handle possible measure error. datetime does not correspond exactly to the time of measure
+        return expected_uptime - eps > self.server_uptime
 
     def __repr__(self):
         if self.id is not None:
             return 'ID: {id}, SERVER_ID: {server_id}, SERVER_UPTIME:{server_uptime}, DATE:{date}'.format(**self.__dict__)
-        else:
-            return 'ID: None, SERVER_ID: {server_id}, SERVER_UPTIME:{server_uptime}, DATE:{date}'.format(**self.__dict__)
+
+        return 'ID: None, SERVER_ID: {server_id}, SERVER_UPTIME:{server_uptime}, DATE:{date}'.format(**self.__dict__)
 
 
 class ServerMonitoredValue(Base):
@@ -75,9 +78,8 @@ class ServerMonitoredValue(Base):
             return 'ID: {id}, SERVER_ID: {server_id}, VALUE_NAME: {value_name}, VALUE:{value}, DATE:{date}'.format(
                 **self.__dict__)
 
-        else:
-            return 'ID: None, SERVER_ID: {server_id}, VALUE_NAME: {value_name}, VALUE:{value}, DATE:{date}'.format(
-                **self.__dict__)
+        return 'ID: None, SERVER_ID: {server_id}, VALUE_NAME: {value_name}, VALUE:{value}, DATE:{date}'.format(
+            **self.__dict__)
 
 
 Base.metadata.create_all(bind=engine)
