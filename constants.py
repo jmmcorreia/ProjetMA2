@@ -1,0 +1,16 @@
+CONFIG_FILE = 'config.ini'
+CONFIG_SECTION = 'CONFIG'
+OIDS_SECTION = 'GET OIDS'
+OIDS_SECTION2 = 'WALK OIDS'
+NMAP_SECTION = 'NMAP'
+
+
+UNKNOWN_DEVICE_TYPE = 'UNKNOWN'
+
+MAX_NMAP_ATTEMPS = 5
+
+SECONDS_TO_HUNDREDTHS = 100
+COUNTER_BITS = 32
+
+
+LOGGING_FORMAT = '[%(asctime)-15s] %(levelname)s - %(levelno)s - LINE:%(lineno)d - %(message)s'
