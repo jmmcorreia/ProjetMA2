@@ -19,6 +19,8 @@ def get_config_file_section(filename, section):
     config = get_config_file(filename)
     if section in config.sections():
         return config[section]
+    else:
+        return None
 
 
 def write_config_to_file(filename, config_dict):
