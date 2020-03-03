@@ -1,3 +1,7 @@
+"""
+This module contains everything that is required to monitor a device of type server.
+"""
+
 import time
 import logging
 from threading import Thread
@@ -15,6 +19,9 @@ SERVER_LOGGER = logging.getLogger('Server Monitoring')
 
 
 class ServerMonitoring(Thread):
+    """
+    This class handles the monitoring of a LINUX server using the SNMP protocol.
+    """
 
     def __init__(self, server_ip, server_mac, time_btw_queries, alert_handler):
         super().__init__()

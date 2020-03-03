@@ -1,3 +1,9 @@
+"""
+This module contains everything needed to create and save alerts regarding
+the monitored devices.
+"""
+
+
 import logging
 import time
 from threading import Thread
@@ -10,6 +16,10 @@ ALERT_LOGGER = logging.getLogger('Device Alerts Handler')
 
 
 class DeviceAlertsHandler(Thread):
+    """
+    This class contains all the methods needed to create different alerts regarding the monitored
+    devices.
+    """
 
     def __init__(self):
         super().__init__()
