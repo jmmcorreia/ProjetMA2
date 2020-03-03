@@ -1,5 +1,5 @@
 """
-This module contains all the models required to monitor a device including the device itself.
+Module that contains contains all the models required to monitor a device including the device itself.
 """
 from sqlalchemy import Column, DateTime, String, Integer, ForeignKey
 from sqlalchemy.orm import relationship

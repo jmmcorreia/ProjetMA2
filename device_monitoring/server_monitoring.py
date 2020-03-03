@@ -20,7 +20,7 @@ SERVER_LOGGER = logging.getLogger('Server Monitoring')
 
 class ServerMonitoring(Thread):
     """
-    This class handles the monitoring of a LINUX server using the SNMP protocol.
+    Handles the monitoring of a LINUX server using the SNMP protocol.
     """
 
     def __init__(self, server_ip, server_mac, time_btw_queries, alert_handler):

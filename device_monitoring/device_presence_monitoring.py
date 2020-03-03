@@ -197,7 +197,7 @@ class DevicePing(Thread):
 
     def run(self):
         """
-        This method launches the ping every time_btw_ping seconds.
+        Launches the ping every time_btw_ping seconds.
         :return: None
         """
         self.session = Session()
