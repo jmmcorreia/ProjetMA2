@@ -1,119 +1,147 @@
+import time
+import logging
+from threading import Thread
+from datetime import datetime
+from db_start import Session
+import constants
+from device_monitoring.models import DeviceProcess, DeviceUptime, DeviceMonitoredValue
+from alerts.models import ProcessAlert
 from snmp_monitoring.snmp_query_handler import SnmpQueryHandler, SnmpAgentQueryException, SnmpVersionException, \
     SnmpMissingCredentialsException
 from utils import get_config_file_section
-from threading import Thread
-from db_start import Session, Base, engine
-from sqlalchemy import Column, DateTime, String, ForeignKey, Integer, func
-import datetime
-import time
-import logging
-import constants
 
-logging.basicConfig(filename='ServerMonitoring.log')
+
+SERVER_LOGGER = logging.getLogger('Server Monitoring')
 
 
 class ServerMonitoring(Thread):
 
-    def __init__(self, server_ip, time_btw_queries, server_db_id):
+    def __init__(self, server_ip, server_mac, time_btw_queries, alert_handler):
         super().__init__()
-        self.snmp_query_handler = SnmpQueryHandler(server_ip, get_config_file_section(constants.CONFIG_FILE, constants.OIDS_SECTION), get_config_file_section(constants.CONFIG_FILE, constants.OIDS_SECTION2), version=2)
         self.time_btw_queries = time_btw_queries
-        self.running = True
-        self.server_id = server_db_id
-        self.session = Session()
+        self.server_mac = server_mac
+        self.alert_handler = alert_handler
+        self._snmp_query_handler = SnmpQueryHandler(server_ip,
+                                                    get_config_file_section(constants.CONFIG_FILE, constants.GET_OIDS),
+                                                    get_config_file_section(constants.CONFIG_FILE, constants.WALK_OIDS),
+                                                    version=2)
+        self._noanswer_alert = False
+        self._monitor_processes = self._get_monitor_processes(server_ip)
+        self._session = Session()
+        self._running = True
 
-    def handle_query_result(self, result):
+    def _verify_previous_answer(self):
+        if self._noanswer_alert:
+            self._noanswer_alert = False
+            self.alert_handler.update_snmp_noanswer_alert(datetime.now(), self.server_mac)
+
+    def handle_get_result(self, result):
         for key, value in result.items():
             if key == "SYSTEM_UPTIME":
-                self.handle_server_uptime(value)
+                # There should only be a single system uptime value in the list returned by the query handler
+                self.handle_server_uptime(value[0])
             else:
                 self.handle_monitored_values(key, value)
+
+    def handle_walk_result(self, result):
+        for key, value in result.items():
+            if "PROCESS" in key:
+                self.handle_process_monitoring(value)
 
     def handle_server_uptime(self, server_uptime):
         try:
             sys_uptime = int(server_uptime)
-            server_uptime = ServerUptime(server_id=self.server_id, server_uptime=sys_uptime, date=datetime.datetime.now())
-            alert = server_uptime.test_alert(self.session)  # TODO
-            self.session.add(server_uptime)
-            self.session.commit()
-        except ValueError as e:
-            logging.warning("Failed to cast server uptime value as an int. Error: {0}".format(e))
+            timestamp = datetime.now()
+            server_uptime = DeviceUptime(mac_address=self.server_mac, uptime=sys_uptime, date=timestamp)
+            alert, previous_uptime = server_uptime.test_alert(self._session)
+            if alert:
+                self.alert_handler.create_uptime_alert(timestamp, self.server_mac, previous_uptime.uptime, sys_uptime)
+            self._session.merge(server_uptime)
+        except ValueError as error:
+            SERVER_LOGGER.warning("Failed to cast server uptime value as an int. Error: %s", error)
+
+    def _update_process_monitoring(self, device_process):
+        timestamp = datetime.now()
+        device_process.date = timestamp
+        self._session.merge(device_process)
+
+    def _handle_process_alert(self, device_process):
+        try:
+            process_alert = ProcessAlert.get_open_alert(self.server_mac, device_process.process, self._session)
+            if process_alert is not None:
+                process_alert.recovered = datetime.now()
+                self.alert_handler.update_process_alert(process_alert)
+        except ValueError as error:
+            SERVER_LOGGER.error("PROCESS ALERT EXCEPTION. ERROR: %s", error)
+            process_alerts = ProcessAlert.get_all_open_alerts(self.server_mac, device_process.process, self._session)
+            for process_alert in process_alerts:
+                process_alert.recovered = datetime.now()
+                self.alert_handler.update_process_alert(process_alert)
+
+    def handle_process_monitoring(self, processes_info):
+        running_processes = set()
+        for process in processes_info:
+            process_name = str(process[1])
+            running_processes.add(process_name)
+
+        for process in self._monitor_processes:
+            device_process = (DeviceProcess.get_process(process, self.server_mac, self._session) or
+                              DeviceProcess(mac_address=self.server_mac, process=process))
+            if process in running_processes:
+                self._update_process_monitoring(device_process)
+                self._handle_process_alert(device_process)
+            else:
+                now = datetime.now()
+                if device_process is not None:
+                    self.alert_handler.create_process_alert(now, self.server_mac, process, device_process.date)
+                else:
+                    self.alert_handler.create_process_alert(now, self.server_mac, process, datetime.min)
 
     def handle_monitored_values(self, name, value):
         try:
             value = str(value)
-            monitored_value = ServerMonitoredValue(server_id=self.server_id, value_name=name, value=value, date=datetime.datetime.now())
-            self.session.add(monitored_value)
-            self.session.commit()
-        except ValueError as e:
-            logging.warning("Failed to cast a monitored value as a string. Error: {0}".format(e))
+            monitored_value = DeviceMonitoredValue(mac_address=self.server_mac, value_name=name, value=value,
+                                                   date=datetime.now())
+            self._session.add(monitored_value)
+        except ValueError as error:
+            SERVER_LOGGER.warning("Failed to cast a monitored value as a string. Error: %s", error)
+
+    def handle_noanswer_error(self):
+        if not self._noanswer_alert:
+            self.alert_handler.create_snmp_noanswer_alert(datetime.now(), self.server_mac)
+            self._noanswer_alert = True
+
+    def _stop(self):
+        Session.remove()
+
+    @staticmethod
+    def _get_monitor_processes(server_ip):
+        config = get_config_file_section(constants.CONFIG_FILE, constants.AGENT_CONFIG.format(ip=server_ip))
+        res = config.get("PROCESS_MONITOR", None)
+        if res is not None:
+            return set(res.split(','))
+        return None
 
     def run(self):
-        while self.running:
+        while self._running:
             try:
-                server_values, server_values2 = self.snmp_query_handler.query_agent()
-                self.handle_query_result(server_values)
+                get_values, walk_values = self._snmp_query_handler.query_agent()
+                self.handle_get_result(get_values)
+                self.handle_walk_result(walk_values)
+                self._verify_previous_answer()
+                self._session.commit()
                 time.sleep(self.time_btw_queries)
-            except SnmpAgentQueryException as e:
-                print("Agent not responding")  # TODO Agent not responding
-            except (SnmpVersionException, SnmpMissingCredentialsException) as e:
-                self.running = False  # terminal failure
+                SERVER_LOGGER.debug('************ SUCCESSFUL SNMP QUERY. AGENT %s ************', self.server_mac)
+            except SnmpAgentQueryException as error:
+                self.handle_noanswer_error()
+                SERVER_LOGGER.warning('Agent not responding. ERROR: %s', error)
+            except (SnmpVersionException, SnmpMissingCredentialsException) as error:
+                SERVER_LOGGER.error("TERMINAL ERROR: %s", error)
+                self._running = False  # terminal failure
+            except Exception as error:
+                SERVER_LOGGER.error(
+                    'UNEXPECTED EXCEPTION CATCHED. SERVER MONITORING WILL TERMINATE. EXCEPTION MESSAGE: %s', error)
+                self._running = False
+                raise
 
-
-class ServerUptime(Base):
-    __tablename__ = "server_uptime"
-
-    id = Column(Integer, primary_key=True)
-    server_id = Column(Integer)  # TODO
-    server_uptime = Column(Integer)
-    date = Column(DateTime)
-
-    def test_alert(self, session):
-        alert = False
-        previous_id = session.query(func.max(ServerUptime.id))
-        if previous_id is not None:
-            previous_uptime = session.query(ServerUptime).filter_by(server_id=self.server_id, id=previous_id).first()
-            if previous_uptime is not None:
-                alert = self.compare_uptime(previous_uptime)
-        return alert
-
-    def compare_uptime(self, previous_uptime):
-        delta_time = self.date - previous_uptime.date
-        expected_uptime = (previous_uptime.server_uptime + delta_time.total_seconds() * constants.SECONDS_TO_HUNDREDTHS) % 2 ** constants.COUNTER_BITS  # *100 because server_uptime is in hundredths of a second
-        if expected_uptime > previous_uptime.server_uptime:  # No overflow
-            return previous_uptime.server_uptime > self.server_uptime
-
-        # Handle overflow
-        eps = 2 * constants.SECONDS_TO_HUNDREDTHS  # Handle possible measure error. datetime does not correspond exactly to the time of measure
-        return expected_uptime - eps > self.server_uptime
-
-    def __repr__(self):
-        if self.id is not None:
-            return 'ID: {id}, SERVER_ID: {server_id}, SERVER_UPTIME:{server_uptime}, DATE:{date}'.format(**self.__dict__)
-
-        return 'ID: None, SERVER_ID: {server_id}, SERVER_UPTIME:{server_uptime}, DATE:{date}'.format(**self.__dict__)
-
-
-class ServerMonitoredValue(Base):
-    __tablename__ = "server_monitored_value"
-
-    id = Column(Integer, primary_key=True)
-    server_id = Column(Integer)  # TODO
-    value_name = Column(String)
-    value = Column(String)
-    date = Column(DateTime)
-
-    def __repr__(self):
-        if self.id is not None:
-            return 'ID: {id}, SERVER_ID: {server_id}, VALUE_NAME: {value_name}, VALUE:{value}, DATE:{date}'.format(
-                **self.__dict__)
-
-        return 'ID: None, SERVER_ID: {server_id}, VALUE_NAME: {value_name}, VALUE:{value}, DATE:{date}'.format(
-            **self.__dict__)
-
-
-
-# query = ServerMonitoring("192.168.0.111", 20, 1)
-# query.start()
-# time.sleep(6000)
-# query.running = False
+        self._stop()

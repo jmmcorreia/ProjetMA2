@@ -5,3 +5,4 @@ netifaces==0.10.9
 pysnmp-mibs==0.1.6
 reactor==0.1.4
 twisted==19.10.0
+scapy==2.4.3

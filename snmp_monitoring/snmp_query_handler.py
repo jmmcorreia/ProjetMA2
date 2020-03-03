@@ -1,10 +1,11 @@
-from pysnmp.hlapi import SnmpEngine, getCmd, nextCmd, ObjectIdentity, CommunityData, UsmUserData, UdpTransportTarget, \
-    ContextData, ObjectType
 from itertools import tee
 import logging
 import time
+from pysnmp.hlapi import SnmpEngine, getCmd, nextCmd, ObjectIdentity, CommunityData, UsmUserData, UdpTransportTarget, \
+    ContextData, ObjectType
 
-logging.basicConfig(filename='SNMP.log')
+
+SNMP_LOGGER = logging.getLogger('SNMP Query Handler')
 
 
 class SnmpQueryHandler:
@@ -12,12 +13,12 @@ class SnmpQueryHandler:
     This class handles all the SNMP queries to an agent.
     """
 
-    def __init__(self, server_address, get_values_dict, walk_values_dict, max_nb_tries=3, sleep_between_tries=2,
-                 snmp_port=161, version=2,
-                 community_index='public', username=None, auth_key=None, priv_key=None):
+    def __init__(self, server_address, get_values_dict, walk_values_dict, max_nb_tries=4, sleep_between_tries=5,
+                 snmp_port=161, version=2, community_index='public', username=None, auth_key=None, priv_key=None):
         """
         :param str server_address: IP address (IPv4 format) of the agent to be monitored
-        :param dict monitor_dict:  Dict containing all the parameters to be defined. Key is a user defined name and the value is the OID or the SNMPv2-MIB name.
+        :param dict get_values_dict: Dict containing all the OIDS where a SNMP GET will be performed
+        :param walk_values_dict: Dict containing all the OIDS where a SNMP GET will be performed
         :param int max_nb_tries: Number of tries before the query time out and raises and error
         :param int sleep_between_tries: Time in seconds to wait between queries if the first one fails
         :param int snmp_port: Agent's port used to connect to the agent
@@ -50,8 +51,9 @@ class SnmpQueryHandler:
         :raises: SnmpVersionException: if the SNMP version specified is not valid.
         :raises: SnmpAgentQueryException: if unable to get any information from the agent.
 
-        :return: dict where key corresponds to the key used by the user to identify the OID/name and the value is the
-                 monitored value returned by the Server.
+        :return: tuple with 2 dicts. The first dict contains the information obtained doing SNMP GET while the second
+            one has all the information obtained using SNMP WALK. The key in the dicts corresponds to the key used by
+            the user to identify the OID/name and the value is the monitored value returned by the Server.
         """
         agent_information_get = dict()
         agent_information_walk = dict()
@@ -126,6 +128,7 @@ class SnmpQueryHandler:
             if self.server_username is not None and self.server_authkey is not None:
                 data = UsmUserData(self.server_username, authKey=self.server_authkey, privKey=self.server_privkey)
             else:
+                SNMP_LOGGER.error("SNMPv3 requires credentials but none were given")
                 raise SnmpMissingCredentialsException("SNMPv3 requires credentials but none were given")
 
         if data is not None:
@@ -136,8 +139,9 @@ class SnmpQueryHandler:
                                ObjectType(object_identity),
                                lexicographicMode=False)  # STOPS WALKS WITHOUT CROSSING BOUNDARIES EXAMPLE: IF WE GIVE OID 1.3.6.1.2.1.25.4.2.1.2, WE WILL ONLY WALK 1.3.6.1.2.1.25.4.2.1.2.X VALUES. IF THIS IS TRUE, WE WALK THE WHOLE TREE AFTER 1.3.6.1.2.1.25.4.2.1.2
 
-        raise SnmpVersionException(
-            "SNMPv{}  does not currently exist or is not supported by this query".format(self.snmp_version))
+        SNMP_LOGGER.error("SNMPv%d does not currently exist or isn't supported by this query", self.snmp_version)
+        raise SnmpVersionException("SNMPv%d does not currently exist or isn't supported by this query" %
+                                   self.snmp_version)
 
     def _snmp_get(self, cmd_generator, tries=0):
         """
@@ -154,20 +158,21 @@ class SnmpQueryHandler:
             # http://snmplabs.com/pysnmp/examples/hlapi/asyncore/sync/manager/cmdgen/snmp-versions.html#snmpv2c
             error_indication, error_status, error_index, var_bind = next(cmd_generator)
         else:
-            raise SnmpAgentQueryException(
-                "Server did not response to any of the {} SNMP query performed.".format(self.max_nb_tries))
+            SNMP_LOGGER.error("Server did not respond to any of the %d SNMP query performed.", self.max_nb_tries)
+            raise SnmpAgentQueryException("Server did not respond to any of the %d SNMP query performed." %
+                                          self.max_nb_tries)
 
         if error_indication:
-            logging.warning(error_indication)
+            SNMP_LOGGER.warning(error_indication)
         elif error_status:
-            logging.warning('{} at {}'.format(error_status.prettyPrint(), error_index and var_bind[0] or '?'))
+            SNMP_LOGGER.warning('%s at %s', error_status.prettyPrint(), error_index and var_bind[0] or '?')
 
         if error_indication or error_status:
             time.sleep(self.sleep_between_tries)
             return self._snmp_get(copy_cmd_generator, tries + 1)
 
-        oid, value = var_bind[0]
-        return value
+        _, value = var_bind[0]
+        return [value]
 
     def _snmp_walk(self, cmd_generator, tries=0):
         cmd_generator, copy_cmd_generator = tee(cmd_generator)
@@ -178,10 +183,10 @@ class SnmpQueryHandler:
             for (error_indication, error_status, error_index, var_binds) in cmd_generator:
 
                 if error_indication:
-                    logging.warning(error_indication)
+                    SNMP_LOGGER.warning(error_indication)
                 elif error_status:
-                    logging.warning('{} at {}'.format(error_status.prettyPrint(),
-                                                      error_index and var_binds[int(error_index) - 1][0] or '?'))
+                    SNMP_LOGGER.warning('%s at %s', error_status.prettyPrint(),
+                                        error_index and var_binds[int(error_index) - 1][0] or '?')
                     error = True
                     break
                 else:
@@ -190,26 +195,25 @@ class SnmpQueryHandler:
                         # print(' = '.join([x.prettyPrint() for x in var_bind]))
 
         else:
-            raise SnmpAgentQueryException(
-                "Server did not response to any of the {} SNMP query performed.".format(self.max_nb_tries))
+            SNMP_LOGGER.error("Server did not respond to any of the %d SNMP query performed.", self.max_nb_tries)
+            raise SnmpAgentQueryException("Server did not respond to any of the %d SNMP query performed." %
+                                          self.max_nb_tries)
 
         if error:
             time.sleep(self.sleep_between_tries)
-            return self._snmp_get(copy_cmd_generator, tries + 1)
+            return self._snmp_walk(copy_cmd_generator, tries + 1)
 
         return result
 
     def parse_oid_dict(self, get_values_dict, walk_values_dict):
         """
-        Receives a dict where the key is the user defined name for the parameter we want to monitor using SNMP and the
-        value is either the OID or the name of the said parameter. The name must be the one as presented in the
-        SNMPv2-MIB standard. For example, the value can either be 1.3.6.1.2.1.1.3.0 or sysUpTime.
+        Receives two dicts where the key is the user defined name for the parameter we want to monitor using SNMP and
+        the value is either the OID or the MIB name followed by the resource name and the last portion of the OID
+        if required. In this last case, a comma should be use to split the parameter's name and the MIB
+        such as HOST-RESOURCES-MIB,hrSystemUptime,0
 
-        Only the names on the following list are supported: http://www.oidview.com/mibs/0/SNMPv2-MIB.html
-        Use the OID if the name is not present on the list
-
-        :param dict monitor_dict: dict containing all the parameters to be defined. Key is a user defined name and the
-               value is the OID or the SNMPv2-MIB name.
+        :param dict get_values_dict: Dict containing all the OIDS where a SNMP GET will be performed
+        :param walk_values_dict: Dict containing all the OIDS where a SNMP GET will be performed
         :return: None
         """
         for key, value in get_values_dict.items():
