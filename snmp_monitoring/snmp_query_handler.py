@@ -1,8 +1,13 @@
+"""
+Module containing everything that is required to perform SNMP Queries.
+Only supports SNMPv1 or SNPv2c
+"""
+
 from itertools import tee
 import logging
 import time
-from pysnmp.hlapi import SnmpEngine, getCmd, nextCmd, ObjectIdentity, CommunityData, UsmUserData, UdpTransportTarget, \
-    ContextData, ObjectType
+from pysnmp.hlapi import SnmpEngine, getCmd, nextCmd, ObjectIdentity, CommunityData, UdpTransportTarget, ContextData, \
+    ObjectType
 
 
 SNMP_LOGGER = logging.getLogger('SNMP Query Handler')
@@ -14,7 +19,7 @@ class SnmpQueryHandler:
     """
 
     def __init__(self, server_address, get_values_dict, walk_values_dict, max_nb_tries=4, sleep_between_tries=5,
-                 snmp_port=161, version=2, community_index='public', username=None, auth_key=None, priv_key=None):
+                 snmp_port=161, version=2, community_index='public'):
         """
         :param str server_address: IP address (IPv4 format) of the agent to be monitored
         :param dict get_values_dict: Dict containing all the OIDS where a SNMP GET will be performed
@@ -23,19 +28,13 @@ class SnmpQueryHandler:
         :param int sleep_between_tries: Time in seconds to wait between queries if the first one fails
         :param int snmp_port: Agent's port used to connect to the agent
         :param int version: SNMP version to be used (it can either be 1, 2, or 3)
-        :param str username: SNMP username. Only specify if using version 3
-        :param str auth_key: SNMP Authentication key.  Only specify if using version 3
-        :param str priv_key: SNMP Private key. Only specify if using version 3
         """
         self.server_address = server_address
         self.snmp_version = version
-        self.server_username = username
         self.max_nb_tries = max_nb_tries
         self.sleep_between_tries = sleep_between_tries
         self.snmp_port = snmp_port
         self.community_index = community_index
-        self.server_authkey = auth_key
-        self.server_privkey = priv_key
         self.snmp_engine = SnmpEngine()
         self.oid_get = dict()
         self.var_name_get = dict()
@@ -47,7 +46,6 @@ class SnmpQueryHandler:
         """
         Queries the agent that is currently being monitored
 
-        :raises: SnmpMissingCredentialsException: if username and auth_key are missing and version is 3.
         :raises: SnmpVersionException: if the SNMP version specified is not valid.
         :raises: SnmpAgentQueryException: if unable to get any information from the agent.
 
@@ -114,34 +112,24 @@ class SnmpQueryHandler:
         """
         Generates the getCmd (see pySNMP doc) required to retrieve information from the agent.
 
-        :raises: SnmpMissingCredentialsException: if username and auth_key are missing and version is 3.
         :raises: SnmpVersionException: if the SNMP version specified is not valid.
 
         :param object_identity: pySNMP object identity corresponding to the information we are looking for
         :return: cmd_command result
         """
-        data = None
 
         if self.snmp_version == 1 or self.snmp_version == 2:
             data = CommunityData(self.community_index, mpModel=self.snmp_version - 1)
-        elif self.snmp_version == 3:
-            if self.server_username is not None and self.server_authkey is not None:
-                data = UsmUserData(self.server_username, authKey=self.server_authkey, privKey=self.server_privkey)
-            else:
-                SNMP_LOGGER.error("SNMPv3 requires credentials but none were given")
-                raise SnmpMissingCredentialsException("SNMPv3 requires credentials but none were given")
-
-        if data is not None:
             return cmd_command(SnmpEngine(),
                                data,
                                UdpTransportTarget((self.server_address, self.snmp_port)),
                                ContextData(),
                                ObjectType(object_identity),
-                               lexicographicMode=False)  # STOPS WALKS WITHOUT CROSSING BOUNDARIES EXAMPLE: IF WE GIVE OID 1.3.6.1.2.1.25.4.2.1.2, WE WILL ONLY WALK 1.3.6.1.2.1.25.4.2.1.2.X VALUES. IF THIS IS TRUE, WE WALK THE WHOLE TREE AFTER 1.3.6.1.2.1.25.4.2.1.2
-
-        SNMP_LOGGER.error("SNMPv%d does not currently exist or isn't supported by this query", self.snmp_version)
-        raise SnmpVersionException("SNMPv%d does not currently exist or isn't supported by this query" %
-                                   self.snmp_version)
+                               lexicographicMode=False)  # STOPS WALKS WITHOUT CROSSING BOUNDARIES # EXAMPLE: IF WE GIVE OID 1.3.6.1.2.1.25.4.2.1.2, WE WILL ONLY WALK 1.3.6.1.2.1.25.4.2.1.2.X VALUES. IF THIS IS TRUE, WE WALK THE WHOLE TREE AFTER 1.3.6.1.2.1.25.4.2.1.2
+        else:
+            SNMP_LOGGER.error("SNMPv%d does not currently exist or isn't supported by this query", self.snmp_version)
+            raise SnmpVersionException("SNMPv%d does not currently exist or isn't supported by this query" %
+                                       self.snmp_version)
 
     def _snmp_get(self, cmd_generator, tries=0):
         """
@@ -238,10 +226,4 @@ class SnmpAgentQueryException(Exception):
 class SnmpVersionException(Exception):
     """
     Raised when the SNMP version chosen by the user does not exist or isn't supported.
-    """
-
-
-class SnmpMissingCredentialsException(Exception):
-    """
-    Raised when the SNMP version chosen by the user requires credentials but they were not specified.
     """
