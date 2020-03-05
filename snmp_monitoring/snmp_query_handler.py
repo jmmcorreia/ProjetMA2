@@ -36,10 +36,10 @@ class SnmpQueryHandler:
         self.snmp_port = snmp_port
         self.community_index = community_index
         self.snmp_engine = SnmpEngine()
-        self.oid_get = dict()
-        self.var_name_get = dict()
-        self.oid_walk = dict()
-        self.var_name_walk = dict()
+        self.oid_get = {}
+        self.var_name_get = {}
+        self.oid_walk = {}
+        self.var_name_walk = {}
         self.parse_oid_dict(get_values_dict, walk_values_dict)
 
     def query_agent(self):
@@ -53,8 +53,8 @@ class SnmpQueryHandler:
             one has all the information obtained using SNMP WALK. The key in the dicts corresponds to the key used by
             the user to identify the OID/name and the value is the monitored value returned by the Server.
         """
-        agent_information_get = dict()
-        agent_information_walk = dict()
+        agent_information_get = {}
+        agent_information_walk = {}
 
         for key, value in self.oid_get.items():
             agent_information_get[key] = self._snmp_get(self._create_cmd_generator_by_oid(value, getCmd))
@@ -126,10 +126,10 @@ class SnmpQueryHandler:
                                ContextData(),
                                ObjectType(object_identity),
                                lexicographicMode=False)  # STOPS WALKS WITHOUT CROSSING BOUNDARIES # EXAMPLE: IF WE GIVE OID 1.3.6.1.2.1.25.4.2.1.2, WE WILL ONLY WALK 1.3.6.1.2.1.25.4.2.1.2.X VALUES. IF THIS IS TRUE, WE WALK THE WHOLE TREE AFTER 1.3.6.1.2.1.25.4.2.1.2
-        else:
-            SNMP_LOGGER.error("SNMPv%d does not currently exist or isn't supported by this query", self.snmp_version)
-            raise SnmpVersionException("SNMPv%d does not currently exist or isn't supported by this query" %
-                                       self.snmp_version)
+
+        SNMP_LOGGER.error("SNMPv%d does not currently exist or isn't supported by this query", self.snmp_version)
+        raise SnmpVersionException("SNMPv%d does not currently exist or isn't supported by this query" %
+                                   self.snmp_version)
 
     def _snmp_get(self, cmd_generator, tries=0):
         """
@@ -160,7 +160,7 @@ class SnmpQueryHandler:
             return self._snmp_get(copy_cmd_generator, tries + 1)
 
         _, value = var_bind[0]
-        return [value]
+        return value
 
     def _snmp_walk(self, cmd_generator, tries=0):
         cmd_generator, copy_cmd_generator = tee(cmd_generator)

@@ -9,11 +9,13 @@ import time
 from scapy.layers.l2 import arping, Ether
 from scapy.layers.inet import IP, ICMP
 from scapy.all import srp, sr
-from db_start import Session
+
+from alerts.models import PresenceAlert
 from device_monitoring.models import Device, DevicePresence
+from db_start import Session
 
 
-PRESENCE_LOGGER = logging.getLogger('Device Monitoring')
+PRESENCE_LOGGER = logging.getLogger('Device Presence Monitoring')
 
 
 class PingHandler:
@@ -21,14 +23,12 @@ class PingHandler:
     This class creates and handles all the objects used to ping the devices (Device Ping)
     """
 
-    def __init__(self, alert_handler):
+    def __init__(self):
         """
 
-        :param alert_handler:
         """
-        self.devices_ping = dict()
+        self.devices_ping = {}
         self.session = Session()
-        self.alert_handler = alert_handler
         self._create_device_pinger()
 
     def add_device(self, device):
@@ -40,7 +40,7 @@ class PingHandler:
         :return: None
         """
         if device.mac_address not in self.devices_ping:
-            device_ping = DevicePing(device, self.alert_handler)
+            device_ping = DevicePing(device)
             device_ping.start()
             self.devices_ping[device.mac_address] = device_ping
         else:
@@ -76,17 +76,15 @@ class DevicePing(Thread):
     This class monitors the device presence using a combination of ICMP and ARP pings
     """
 
-    def __init__(self, device, alert_handler, time_btw_ping=60):
+    def __init__(self, device, time_btw_ping=60):
         """
 
         :param device:
-        :param alert_handler:
         :param time_btw_ping:
         """
         super().__init__()
-        self.session = None
+        self._session = None
         self.device = device
-        self.alert_handler = alert_handler
         self.device_presence = None
         self.time_btw_ping = time_btw_ping
         self.present = True
@@ -100,7 +98,7 @@ class DevicePing(Thread):
         :param int timeout: maximum time to wait for a ICMP echo-reply
         :return boolean: True if device answered, False otherwise
         """
-        ans, unans = srp(Ether(dst=self.device.mac_address) / IP(dst=self.device.ip) / ICMP(), timeout=timeout)
+        ans, _ = srp(Ether(dst=self.device.mac_address) / IP(dst=self.device.ip) / ICMP(), timeout=timeout)
         return len(ans)
 
     def send_icmp_packet(self, timeout=1.0):
@@ -111,7 +109,7 @@ class DevicePing(Thread):
         :param int timeout: maximum time to wait for a ICMP echo-reply
         :return boolean: True if device answered, False otherwise
         """
-        ans, unans = sr(IP(dst=self.device.ip) / ICMP(), timeout=timeout)
+        ans, _ = sr(IP(dst=self.device.ip) / ICMP(), timeout=timeout)
         return len(ans)
 
     def send_arp_req(self, timeout=1.0):
@@ -122,7 +120,7 @@ class DevicePing(Thread):
         :param int timeout: maximum time to wait for an answer
         :return boolean: True if device answered, False otherwise
         """
-        ans, unans = arping(self.device.ip, timeout=timeout)
+        ans, _ = arping(self.device.ip, timeout=timeout)
         return len(ans)
 
     def ping_device(self):
@@ -134,28 +132,28 @@ class DevicePing(Thread):
         :return: None
         """
         if self.send_icmp_frame(2):
-            self.update_presence()
+            self._update_presence()
             return
         PRESENCE_LOGGER.warning("************ ICMP FRAME FAILED / MAC ADDRESS: %s / IP: %s ************",
                                 self.device.mac_address, self.device.ip)
 
         time.sleep(10)
         if self.send_arp_req(4):
-            self.update_presence()
+            self._update_presence()
             return
         PRESENCE_LOGGER.warning("************ ARP REQUEST FAILED / MAC ADDRESS: %s ************",
                                 self.device.mac_address)
 
         time.sleep(10)
         if self.send_icmp_packet(4):
-            self.update_presence()
+            self._update_presence()
             return
         PRESENCE_LOGGER.warning("************ ICMP PACKET FAILED / MAC ADDRESS: %s / IP: %s ************",
                                 self.device.mac_address, self.device.ip)
 
         time.sleep(10)
         if self.send_icmp_frame(10):
-            self.update_presence()
+            self._update_presence()
             return
 
         PRESENCE_LOGGER.warning(
@@ -166,17 +164,18 @@ class DevicePing(Thread):
 
     def _handle_down(self):
         """
-        Handles the down state of a device.
-
+        Creates a PresenceAlert and add it to the database.
         :return: None
         """
         timestamp = datetime.now()
         if self.present:
-            self.alert_handler.create_presence_alert(timestamp, self.device_presence.mac_address,
-                                                     self.device_presence.last_seen)
+            presence_alert = PresenceAlert(timestamp=timestamp, mac_address=self.device_presence.mac_address,
+                                           last_seen=self.device_presence.last_seen)
+            self._session.add(presence_alert)
+
         self.present = False
 
-    def update_presence(self):
+    def _update_presence(self):
         """
         Updates the last seen presence value in the database regarding the monitored device.
         Moreover, if the device as an ongoing alert for not being present, that alert is closed.
@@ -188,24 +187,33 @@ class DevicePing(Thread):
         timestamp = datetime.now()
         if not self.present:
             self.present = True
-            self.alert_handler.update_presence_alert(self.device_presence.mac_address, self.device_presence.last_seen,
-                                                     timestamp)
+            alert_update = PresenceAlert.get_presence_alert(self.device_presence.mac_address,
+                                                            self.device_presence.last_seen,
+                                                            self._session)
+            alert_update.recovered = timestamp
+            self._session.merge(alert_update)
 
         self.device_presence = DevicePresence(mac_address=self.device.mac_address, last_seen=timestamp)
-        self.session.merge(self.device_presence)
-        self.session.commit()
+        self._session.merge(self.device_presence)
 
     def run(self):
         """
         Launches the ping every time_btw_ping seconds.
         :return: None
         """
-        self.session = Session()
-        self.device_presence = self.session.query(DevicePresence).filter_by(mac_address=self.device.mac_address).first()
+        self._session = Session()
+        self.device_presence = self._session.query(DevicePresence).filter_by(
+            mac_address=self.device.mac_address).first()
         while self.running:
             try:
                 self.ping_device()
+                self._session.commit()
                 time.sleep(self.time_btw_ping)
+            except OSError as error:
+                PRESENCE_LOGGER.error('SCAPY PING PROBLEM. ERROR: %s. PINGING WILL RESTART AFTER %d SLEEP', error,
+                                      self.time_btw_ping)
+                time.sleep(self.time_btw_ping)
+
             except Exception as error:
                 PRESENCE_LOGGER.error('EXCEPTION IN DEVICE PING. DEVICE IP: %s. DEVICE MAC: %s. ERROR: %s',
                                       self.device.ip, self.device.mac_address, error)

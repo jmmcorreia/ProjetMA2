@@ -129,7 +129,7 @@ class DeviceProcess(Base):
 
     mac_address = Column(String, ForeignKey('device.mac_address'), primary_key=True)
     process = Column(String, primary_key=True)
-    date = Column(DateTime)
+    last_seen = Column(DateTime)
 
     @staticmethod
     def get_process(process, mac_address, session):

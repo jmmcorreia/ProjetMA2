@@ -16,14 +16,8 @@ def _set_sqlite_pragma(dbapi_connection, connection_record):
 
 
 Base = declarative_base()
-engine = create_engine('sqlite:///test.db', echo=True, poolclass=NullPool)  # connect_args={'check_same_thread': False}
+engine = create_engine('sqlite:///test.db', echo=True, poolclass=NullPool, connect_args={'timeout': 15})  # connect_args={'check_same_thread': False}
 session_factory = sessionmaker(bind=engine)
 Session = scoped_session(session_factory)
 
 Session.configure(bind=engine)  # once engine is available
-
-
-
-
-
-

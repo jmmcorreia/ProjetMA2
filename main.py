@@ -13,7 +13,6 @@ from db_start import Session, engine
 from device_monitoring.network_mapper import NetworkMapper
 from device_monitoring.server_monitoring import ServerMonitoring
 from device_monitoring.device_presence_monitoring import PingHandler, Device
-from alerts.device_alerts_handler import DeviceAlertsHandler
 
 
 def map_network(nmap_config):
@@ -31,13 +30,12 @@ def map_network(nmap_config):
     nmap.join()
 
 
-def start_server_monitoring(agents_config, device_alerts_handler, session):
+def start_server_monitoring(agents_config, session):
     """
     Creates and starts a ServerMonitoring object for each server that should be monitored.
     However, the object is only created if the server is present in the device list of the database.
 
     :param dict agents_config: configuration common to all the server agents
-    :param DeviceAlertsHandler device_alerts_handler: a DeviceAlertsHandler object
     :param Session session: a SQLAlchemy session to connect to the database
     :return list: returns a list with all the ServerMonitoring (one for each monitored agent)
     """
@@ -50,12 +48,10 @@ def start_server_monitoring(agents_config, device_alerts_handler, session):
             agent = session.query(Device).filter_by(ip=ip_address).first()
             if len(agent_values) > 1 and agent is not None:
                 agent_query_time = int(agent_values[1])
-                agent_monitoring = ServerMonitoring(ip_address, agent.mac_address, agent_query_time,
-                                                    device_alerts_handler)
+                agent_monitoring = ServerMonitoring(ip_address, agent.mac_address, agent_query_time)
                 snmp_agents.append(agent_monitoring)
             elif agent is not None:
-                agent_monitoring = ServerMonitoring(ip_address, agent.mac_address, time_btw_queries,
-                                                    device_alerts_handler)
+                agent_monitoring = ServerMonitoring(ip_address, agent.mac_address, time_btw_queries)
                 snmp_agents.append(agent_monitoring)
             else:
                 logging.error("AGENT WITH IP %s WAS NOT FOUND IN THE NETWORK", ip_address)
@@ -77,17 +73,17 @@ def main():
         config = get_config_file(CONFIG_FILE)
         map_network(config[NMAP_SECTION])
 
-        device_alerts_handler = DeviceAlertsHandler()
-        device_alerts_handler.start()
+        agents = start_server_monitoring(config[AGENTS_SECTION], session)
 
-        agents = start_server_monitoring(config[AGENTS_SECTION], device_alerts_handler, session)
+        ping_handler = PingHandler()
 
         for agent in agents:
             agent.join()
 
-        ping_handler = PingHandler(device_alerts_handler)
 
-    except Exception:
+
+    except Exception as error:
+        logging.error("TERMINAL ERROR IN THE MAIN MODULE: %s", error)
         Session.remove()
         engine.dispose()
         sys.exit(-1)

@@ -19,8 +19,7 @@ def get_config_file_section(filename, section):
     config = get_config_file(filename)
     if section in config.sections():
         return config[section]
-    else:
-        return None
+    return None
 
 
 def write_config_to_file(filename, config_dict):
@@ -34,10 +33,9 @@ def get_file(filename):
     file_extension = split_filename[-1]
     if file_extension == 'json':
         return get_json_file(filename)
-    elif file_extension == 'ini':
+    if file_extension == 'ini':
         return get_config_file(filename)
-    else:
-        raise UnknownFileExtension
+    raise UnknownFileExtension
 
 
 class UnknownFileExtension(Exception):
